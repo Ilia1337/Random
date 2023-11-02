@@ -7,7 +7,21 @@ from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import declarative_base, sessionmaker
 import pygame
 
+
 pygame.init()
+
+def find(vector: str):
+    first = None
+    for num, sign in enumerate(vector):
+        if sign == '<':
+            first = num
+        if sign == '>' and first is not None:
+            second = num
+            result = vector[first+1:second]
+            result = result.split(',')
+            result = map(float,result)
+            return result
+    return ''
 
 WIDTH_ROOM,HEIGHT_ROOM = 4000,4000
 WIDTH_SERVER,HEIGHT_SERVER = 300,300 
@@ -38,7 +52,9 @@ pygame.display.set_caption("СЕРВЕР")
 # фпс
 clock = pygame.time.Clock()
 
-# создаём класс игрока и неаследуемся от базы 
+
+
+# создаём класс таблицы игроков и неаследуемся от базы 
 class Player(Base):
     __tablename__ = 'gamers' 
     id = Column(Integer,primary_key=True,autoincrement=True)
@@ -48,16 +64,17 @@ class Player(Base):
     y = Column(Integer, default=500)
     size = Column(Integer, default=50)
     errors = Column(Integer,default= 0)
-    abs_speed = Column(Integer, default=1)
-    speed_x = Column(Integer, default=0)
-    speed_y = Column(Integer, default=0)
+    abs_speed = Column(Integer, default=2)
+    speed_x = Column(Integer, default=2)
+    speed_y = Column(Integer, default=2)
     
     # иницилизируем класс
     def __init__(self,name,adres):
         self.name = name
         self.adres = adres
                                     
-# создаём класс локального игрока
+# создаём локальный класс таблицы игроков
+
 class Local_player:
     def __init__(self,id,name,sock,adres):
         self.id = id
@@ -72,15 +89,35 @@ class Local_player:
         self.abs_speed = 1 
         self.speed_x = 0
         self.speed_y = 0
+    def update(self):
+        self.x += self.speed_x
+        self.y += self.speed_y
+    # изменяем скорость
+    def change_speed(self,vector):
+        vector = find(vector)
+        if vector[0] == 0 and vector[1] == 0:
+            self.speed_x = self.speed_y = 0
+        else:
+            vector = vector[0] * self.abs_speed, vector[1] * self.abs_speed
+            self.speed_x = vector[0]
+            self.speed_y = vector[1]
 
 
 Base.metadata.create_all(engine)
 
 # цикл соединения с клиентом (recv - количество байт кодировки, decode - декодироват ь сообзение)
 list_us = {}
-while True:
+sw = True
+while sw:
     clock.tick(FPS)
     
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            sw = False                                                                                   
+            
+    screen.fill('black')
+
+
     # принятие игрока
     try:
         new_sock,addr = main_sock.accept()                                         
@@ -96,29 +133,56 @@ while True:
         addr = f'({addr[0]},{addr[1]})'
         data = s.query(Player).filter(Player.adres == addr)
         
-        # проверяем айди
+        # создаём локальный класс игрока
         for user in data:
             player = Local_player(user.id, "Имя", new_sock,addr)
             list_us[user.id] = player
         
-        # получение данных
+        
     except BlockingIOError:
         pass   
         
+        # считываем команды игроков 
         for id in list(list_us):
             try:
                 data = list_us[id].sock.recv(1024).decode()
                 print("Получил", data)
+                list_us[id].change_speed(data)
             except:
                 pass
         
-        # проверяем не вышел ли игрок и закрываем сервер
+        # проверяем не вышел ли игрок и закрываем сокет
         for id in list(list_us):
             try:
                 list_us[id].sock.send("Игра".encode())
-            except:
+            except:                                                                
                 list_us[id].sock.close()
                 del list_us[id]            
                 s.query(Player).filter(Player.id == id).delete()
-                s.commit()
+                s.commit()  
                 print("Сокет закрыт")    
+    # синъронизируем окно комнаты и сервера
+    for id in list_us:
+        player = list_us[id]
+        x = player.x * (round((WIDTH_SERVER/WIDTH_ROOM),1))
+        y = player.y * (round((HEIGHT_SERVER/HEIGHT_ROOM),1))
+        size = player.size * (round((WIDTH_SERVER/WIDTH_ROOM),1))
+        # рисуем круг
+        pygame.draw.circle(screen,'yellow',(x,y),size)
+        print(player, player.x, player.y)
+        
+    #   цикл обновления всех игроков
+    for id in list(list_us):
+        player = list_us[id]
+        list_us[id].update()
+        s.merge()
+        s.commit()
+    
+    # обновляем дисплей
+    pygame.display.update()
+    
+
+pygame.quit()
+main_sock.close()
+s.query(Player).delete()
+s.commit()                                                           

@@ -36,7 +36,7 @@ while run:
             vector = pos[0]-CS[1],pos[1]-CS[1]
             length =  math.sqrt(vector[0]**2+vector[1]**2)
             vector = vector[0]/length, vector[1]/length                         
-
+            
             # радиуса
             print(vector)         
             if length <= radius:
